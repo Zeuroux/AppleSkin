@@ -1,0 +1,14 @@
+{
+  "uuid": "31dc6f7b-af7b-4366-ae03-42ade8afa29a",
+  "plugin_name": "AppleSkin",
+  "plugin_author": "Zeuroux",
+  "plugin_description": "Appleskin but in onixclient",
+  "plugin_version": "1.0.0",
+  "game_version": "1.21.82",
+  "supported_game_version_ranges": [
+    "0.0.0-9.99.9"
+  ],
+  "categories": [ "Utility", "Client Side" ],
+  "runtime_version": 2,
+  "target_assembly": "AppleSkin.dll"
+}
