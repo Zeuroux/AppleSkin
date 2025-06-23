@@ -3,21 +3,22 @@ using OnixRuntime.Api.Entities;
 using OnixRuntime.Api.Inputs;
 using OnixRuntime.Api.Items;
 using OnixRuntime.Api.Maths;
-using OnixRuntime.Api.OnixClient;
 using OnixRuntime.Api.Rendering;
 using OnixRuntime.Api.UI;
 using OnixRuntime.Api.Utils;
 using OnixRuntime.Plugin;
 using System.Collections.Immutable;
 using System.Text;
-using System.Text.Json;
 
 namespace AppleSkin
 {
 
     public class AppleSkin : OnixPluginBase
     {
-        private readonly Dictionary<string, FoodItem> foods = new()
+        private const float FrameThreshold = 1 / 60;
+        private const string visibleFalse = "\"#visible\":false";
+        private const string visibleTrue = "\"#visible\":true";
+        private static readonly Dictionary<string, FoodItem> foods = new()
         {
             { "apple", new FoodItem { Hunger = 4, Saturation = 2.4f, AlwaysConsumable = true } },
             { "baked_potato", new FoodItem { Hunger = 5, Saturation = 6 } },
@@ -61,27 +62,19 @@ namespace AppleSkin
             { "sweet_berries", new FoodItem { Hunger = 2, Saturation = 1.2f } },
             { "tropical_fish", new FoodItem { Hunger = 1, Saturation = 0.2f } }
         };
-        private readonly float FrameThreshold = 1 / 60;
-        private readonly NineSlice tooltip = new(TexturePath.Game("textures/ui/purpleBorder"));
-        private readonly OnixModule DebugScreen = Onix.Client.Modules.GetModule("module.java_debug_menu.name")!;
-        private readonly Random rand = new();
-        private readonly TexturePath icons = TexturePath.Game("textures/gui/icons.png");
-        private readonly TexturePath normal_outline = TexturePath.Assets("normal_outline.png");
-        private readonly TexturePath hungered_outline = TexturePath.Assets("hungered_outline.png");
-        private readonly TexturePath exhaustion_background = TexturePath.Assets("exhaustion.png");
-        private readonly Vec2 tooltipPadding = new(4.5f, 4.2f);
-        private readonly Vec2 tooltipOffset = new(10, -10);
-        private readonly Vec2 size = new(9);
+        private static readonly Random rand = new();
+        private static readonly Vec2 tooltipPadding = new(4.5f, 4.2f);
+        private static readonly Vec2 tooltipOffset = new(10, -10);
+        private static readonly Vec2 size = new(9);
         private Vec2 hungerbar_pos;
         private float saturation = 0f, hunger = 0f, exhaustion = 0f, unclampedFlashAlpha = 0f, flashAlpha = 0f, accumulator = 0f;
         private int updateCounter = 0;
-        private bool isOnHunger = false, shouldUpload = true, isHotbarVisible = true, shouldJitter = false;
+        private bool isOnHunger = false, shouldUpload = true, shouldJitter = false;
         private GameUIElement? hungerbar;
         private FoodItem? selectedFood;
         private ItemStack? hoveredFood;
         private sbyte alphaDir = 1;
         private GameMode gamemode;
-        private GameUIElement? selectedUiProfile;
         private int lastHoveredSlot = -1;
         private bool scrollable = false;
         private Vec2 scrollOffset = Vec2.Zero;
@@ -156,38 +149,28 @@ namespace AppleSkin
 
         private void OnSessionLeave()
         {
-            UiProfiles.Clear();
             hungerbar = null;
-            selectedUiProfile = null;
         }
+
         private bool OnInput(InputKey key, bool isDown)
         {
-            if (key == InputKey.ClickType.Scroll && hoveredFood is { })
+            if (key == InputKey.ClickType.Scroll && hoveredFood is not null && scrollable)
             {
-                if (scrollable){
-                int direction = (isDown ? 1 : -1) * 9;
-                    if (isHoldingShift)
-                        scrollOffset.X += direction;
-                    else
-                        scrollOffset.Y += direction;
-                }
+                ref var offset = ref (isHoldingShift ? ref scrollOffset.X : ref scrollOffset.Y);
+                offset += (isDown ? 1 : -1) * 9;
                 return true;
             }
-            if (key == InputKey.Type.Shift)
+            else if (key == InputKey.Type.Shift)
                 isHoldingShift = isDown;
             return false;
         }
 
+
         private static Vec2 GetAbsolutePosition(GameUIElement element)
         {
-            Vec2 pos = element.Position;
-            GameUIElement? current = element.Parent;
-
-            while (current != null)
-            {
+            Vec2 pos = default;
+            for (var current = element; current != null; current = current.Parent)
                 pos += current.Position;
-                current = current.Parent;
-            }
             return pos;
         }
 
@@ -331,7 +314,7 @@ namespace AppleSkin
 
             isOnHunger = localPlayer.Effects.Any(e => e.Id == MobEffectId.Hunger);
 
-            if (hungerbar?.Position.X < Onix.Gui.ScreenSize.X)
+            if (hungerbar?.Position.X < Onix.Gui.ScreenSize.X || hungerbar == null || hungerbar.Parent!.JsonProperties.Contains(visibleFalse))
                 Reload();
 
             if (!foods.TryGetValue(localPlayer.MainHandItem.Item?.Name ?? "", out selectedFood) || (!selectedFood.AlwaysConsumable && hunger == 20))
@@ -362,18 +345,8 @@ namespace AppleSkin
 
         private void OnPreRenderScreenGame(RendererGame gfx, float delta, string screenName, bool isHudHidden, bool isClientUi)
         {
-            if (screenName != "hud_screen") return;
-            if (hungerbar != null)
-                isHotbarVisible = hungerbar.Parent!.JsonProperties.Contains("\"#visible\":true");
-            if (hungerbar != null && hungerbar.Parent != null && hungerbar.Parent.JsonProperties.Contains("\"#visible\":false"))
-                Reload();
-
-            if ((isHotbarVisible && DebugScreen.Enabled) || !isHudHidden){
-                if (UiProfiles.Count != 0)
-                    selectedUiProfile = UiProfiles.FirstOrDefault(e => e.JsonProperties.Contains("\"#visible\":true"), UiProfiles[0]);
-                else Reload();
-                RenderHungerBar(gfx, delta);
-            }
+            if (screenName != "hud_screen" || hungerbar == null) return;
+            RenderHungerBar(gfx, delta);
         }
 
         private void OnRenderScreenGame(RendererGame gfx, float delta, string screenName, bool isHudHidden, bool isClientUI)
@@ -384,11 +357,11 @@ namespace AppleSkin
             bool isOnSearchTab = false;
             if (Onix.Gui.RootUiElement is GameUIElement root && Onix.LocalPlayer is LocalPlayer localPlayer)
             {
-                showCategory = root.FindChildRecursive("recipe_book")?.JsonProperties.Contains("\"#visible\":false") == true;
+                showCategory = root.FindChildRecursive("recipe_book")?.JsonProperties.Contains(visibleFalse) == true;
                 var gameMode = localPlayer.GameMode;
                 bool isRecipeBookLayout = root.FindChildRecursive("tab_navigation_panel")?.JsonProperties.Contains("\"#is_recipe_book_layout\":true") == true;
                 var partialName = (gameMode == GameMode.Creative && isRecipeBookLayout ? "end_" : "tab_") + gameMode.ToString().ToLower();
-                ProcessElement(root, e => e.Name.Equals("search_tab_toggle") && e.Parent!.Name.Contains(partialName) || e.Name.Equals("hover_text"), element =>
+                GetElement(root, e => e.Name.Equals("search_tab_toggle") && e.Parent!.Name.Contains(partialName) || e.Name.Equals("hover_text"), element =>
                 {
                     if (element.Name.Equals("hover_text"))
                         element.JsonProperties = "{}";
@@ -454,19 +427,20 @@ namespace AppleSkin
                 tooltipPos += scrollOffset;
             }
 
-            tooltip.Render(gfx, Rect.FromSize(tooltipPos, tooltipSize), 1f);
+            Textures.
+                        tooltip.Render(gfx, Rect.FromSize(tooltipPos, tooltipSize), 1f);
             gfx.RenderText(tooltipPos + tooltipPadding, ColorF.White, itemInfo.ToString());
 
             Rect uvRectHalf = Rect.FromSize(new(61, 27), size).NormalizeWith(256f);
             Rect uvRectWhole = Rect.FromSize(new(52, 27), size).NormalizeWith(256f);
             Rect uvRectBackground = Rect.FromSize(new(16, 27), size).NormalizeWith(256f);
-            TexturePath outline = isOnHunger ? hungered_outline : normal_outline;
+            TexturePath outline = isOnHunger ? Textures.hungered_outline : Textures.normal_outline;
             CacheOutline(gfx, uvRectWhole, outline);
 
             int hungerMid = (int)MathF.Ceiling(foodItem.Hunger / 2f);
             int saturationMid = (int)MathF.Ceiling(foodItem.Saturation / 2f);
 
-            void RenderBackground(Rect rect) { gfx.RenderTexture(rect, icons, 1f, uvRectBackground); }
+            void RenderBackground(Rect rect) { gfx.RenderTexture(rect, Textures.icons, 1f, uvRectBackground); }
             for (int i = 0; i < 10; ++i)
             {
                 int value = (i << 1) | 1;
@@ -506,8 +480,6 @@ namespace AppleSkin
             return finalOrder;
         }
 
-        readonly JsonSerializerOptions options = new() { WriteIndented = true };
-        public string PrettyJson(string unPrettyJson) => JsonSerializer.Serialize(JsonSerializer.Deserialize<JsonElement>(unPrettyJson), options);
 
         private static string EnchantToString(EnchantmentInstance enchant)
         {
@@ -526,7 +498,7 @@ namespace AppleSkin
         {
             if (gfx.GetTextureStatus(outline) == RendererTextureStatus.Missing || shouldUpload)
             {
-                RawImageData hungerWhole = CropUV(RawImageData.Load(Onix.Game.PackManager.LoadContent(icons)), uvRectWhole);
+                RawImageData hungerWhole = CropUV(RawImageData.Load(Onix.Game.PackManager.LoadContent(Textures.icons)), uvRectWhole);
 
                 int width = hungerWhole.Width;
                 int height = hungerWhole.Height;
@@ -543,26 +515,25 @@ namespace AppleSkin
 
         private void RenderHungerBar(RendererGame gfx, float delta)
         {
-            if (hungerbar == null) { Reload(); return; }
             if ((accumulator += delta) < FrameThreshold || selectedFood == null || !(gamemode == GameMode.Survival || gamemode == GameMode.Adventure)) return;
 
             int xOffset = isOnHunger ? 36 : 0;
             Rect uvRectBackground = Rect.FromSize(new(isOnHunger ? 133 : 16, 27), size).NormalizeWith(256f);
             Rect uvRectWhole = Rect.FromSize(new(52 + xOffset, 27), size).NormalizeWith(256f);
             Rect uvRectHalf = Rect.FromSize(new(61 + xOffset, 27), size).NormalizeWith(256f);
-            TexturePath outline = isOnHunger ? hungered_outline : normal_outline;
+            TexturePath outline = isOnHunger ? Textures.hungered_outline : Textures.normal_outline;
             CacheOutline(gfx, uvRectWhole, outline);
 
             float expectedHunger = MathF.Min(hunger + selectedFood.Hunger, 20);
             float expectedSaturation = MathF.Min(Math.Min(expectedHunger, saturation + selectedFood.Saturation), 20);
 
             float exhaustionWidth = MathF.Round(81 * exhaustion);
-            gfx.RenderTexture(new(hungerbar_pos.X - exhaustionWidth + 1, hungerbar_pos.Y, hungerbar_pos.X + 1, hungerbar_pos.Y + 9), exhaustion_background, .7f, new(1f - (exhaustionWidth / 81f), 0f, 1f, 1f));
+            gfx.RenderTexture(new(hungerbar_pos.X - exhaustionWidth + 1, hungerbar_pos.Y, hungerbar_pos.X + 1, hungerbar_pos.Y + 9), Textures.exhaustion_background, .7f, new(1f - (exhaustionWidth / 81f), 0f, 1f, 1f));
 
             for (int i = 0; i < 10; ++i)
             {
                 Rect rect = Rect.FromSize(hungerbar_pos, size).MoveBy(new(-i * 8 - 8, shouldJitter ? -rand.Next(2) : 0));
-                gfx.RenderTexture(rect, icons, 1f, uvRectBackground);
+                gfx.RenderTexture(rect, Textures.icons, 1f, uvRectBackground);
 
                 int idk = (i << 1) | 1;
                 RenderHunger(gfx, uvRectWhole, uvRectHalf, rect, idk, hunger, 1f);
@@ -577,11 +548,11 @@ namespace AppleSkin
             accumulator = 0;
         }
 
-        private void RenderHunger(RendererCommon2D gfx, Rect uvRectWhole, Rect uvRectHalf, Rect rect, int idk, float hunger, float alpha, Action<Rect>? Before = null)
+        private static void RenderHunger(RendererCommon2D gfx, Rect uvRectWhole, Rect uvRectHalf, Rect rect, int idk, float hunger, float alpha, Action<Rect>? Before = null)
         {
             if (idk > hunger) return;
             Before?.Invoke(rect);
-            gfx.RenderTexture(rect, icons, alpha, idk == hunger ? uvRectHalf : uvRectWhole);
+            gfx.RenderTexture(rect, Textures.icons, alpha, idk == hunger ? uvRectHalf : uvRectWhole);
         }
 
         private static void RenderSaturation(RendererCommon2D gfx, TexturePath outline, Rect rect, int idk, float saturation, ColorF color, Action<Rect>? Before = null)
@@ -607,35 +578,36 @@ namespace AppleSkin
             shouldUpload = true;
         }
 
-        private static bool ProcessElement(GameUIElement element, Func<GameUIElement, bool> what, Func<GameUIElement, bool> found)
+        private static bool GetElement(GameUIElement element, Func<GameUIElement, bool> what, Func<GameUIElement, bool> found)
         {
-            if (what(element))
-                if (!found(element))
-                    return false;
+            if (element == null) return true;
+
+            if (what(element) && !found(element))
+                return false;
 
             var children = element.Children;
-            if (children?.Length > 0)
-                foreach (var child in children)
-                    if (!ProcessElement(child, what, found))
-                        return false;
+            if (children == null || children.Length == 0)
+                return true;
+
+            for (int i = 0; i < children.Length; i++)
+                if (!GetElement(children[i], what, found))
+                    return false;
+            
+
             return true;
         }
 
-        private readonly List<GameUIElement> UiProfiles = [];
         private void Reload()
         {
-            ScheduleScreenRelayout();
             if (Onix.Gui.RootUiElement is GameUIElement root){
-                ProcessElement(root, element => element.Children.Any(e => e.Name == "hunger_rend"), element => {
-                    UiProfiles.Add(element);
-                    return true;
-                });
-            }
-            if (selectedUiProfile != null)
-            if ((hungerbar = selectedUiProfile.FindChildRecursive("hunger_rend")) != null)
-            {
-                hungerbar_pos = GetAbsolutePosition(hungerbar);
-                hungerbar.Position *= 69;
+                if (GetElement(root, e => e.Name == "hunger_rend" && e.Parent!.JsonProperties.Contains(visibleTrue), element =>
+                {
+                    ScheduleScreenRelayout();
+                    hungerbar = element;
+                    hungerbar_pos = GetAbsolutePosition(element);
+                    element.Position *= 69;
+                    return false;
+                })) hungerbar = null;
             }
         }
 
@@ -647,8 +619,8 @@ namespace AppleSkin
 
         private static void ScheduleScreenRelayout()
         {
-            Onix.Gui.GuiScale += 0.01f;
-            Onix.Gui.GuiScale -= 0.01f;
+            Onix.Gui.GuiScale += 0.00001f;
+            Onix.Gui.GuiScale -= 0.00001f;
         }
 
         protected override void OnUnloaded()
