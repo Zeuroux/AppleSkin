@@ -9,6 +9,6 @@
     "0.0.0-9.99.9"
   ],
   "categories": [ "Utility", "Client Side" ],
-  "runtime_version": 2,
+  "runtime_version": 3,
   "target_assembly": "AppleSkin.dll"
 }
