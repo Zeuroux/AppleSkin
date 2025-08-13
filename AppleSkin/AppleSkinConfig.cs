@@ -1,11 +1,11 @@
 using OnixRuntime.Api.OnixClient;
 namespace AppleSkin {
     public partial class AppleSkinConfig : OnixModuleSettingRedirector {
-        [Button(nameof(real), "real")]
-        public partial OnixSetting.SettingChangedDelegate fake { get; set; }
-        public void real()
+        [Value("Reeal")]
+        public partial OnixSetting.SettingChangedDelegate MyButton { get; set; }
+        public void function()
         {
-            Console.WriteLine("real called from AppleSkinConfig.cs");
+            Console.WriteLine("Button clicked!");
         }
     }
 }
