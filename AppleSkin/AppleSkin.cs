@@ -3,21 +3,12 @@ using OnixRuntime.Api.Entities;
 using OnixRuntime.Api.Inputs;
 using OnixRuntime.Api.Items;
 using OnixRuntime.Api.Maths;
-using OnixRuntime.Api.OnixClient.Settings;
 using OnixRuntime.Api.Rendering;
-using OnixRuntime.Api.ResourcePacks;
 using OnixRuntime.Api.UI;
 using OnixRuntime.Api.Utils;
 using OnixRuntime.Plugin;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Transactions;
-using static OnixRuntime.Api.Utils.ClientTranslationLayers.VersionTranslationLayerLookupBuilder;
 
 namespace AppleSkin
 {
@@ -25,6 +16,10 @@ namespace AppleSkin
     {
         [GeneratedRegex(@"#hover_text"":""([^""]+)""")]
         public static partial Regex HoverTextRegex();
+        [GeneratedRegex(@"//.*")]
+        public static partial Regex SingleLineCommentRegex();
+        [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
+        public static partial Regex MultiLineCommentRegex();
     }
     public class AppleSkin : OnixPluginBase
     {
@@ -32,15 +27,16 @@ namespace AppleSkin
         private const string visibleFalse = "\"#visible\":false";
         private const string visibleTrue = "\"#visible\":true";
         private static readonly Random rand = new();
-        private static readonly Vec2 tooltipPadding = new(4.1f, 4.2f);
+        private static readonly Vec2 tooltipPadding = new(4f, 4f);
         private static readonly Vec2 tooltipOffset = new(10, -10);
         private static readonly Vec2 size = new(9);
-        private static Vec2 hungerbar_pos;
-        private static float saturation = 0f, hunger = 0f, exhaustion = 0f, unclampedFlashAlpha = 0f, flashAlpha = 0f, accumulator = 0f;
+        private static Vec2 hungerbar_pos, healthbar_pos;
+        private static GameUIElement? hungerbar, healthbar;
+        public static float saturation = 0f, hunger = 0f, exhaustion = 0f, health = 0f;
+        private static float exhaustion_percent = 0f, health_increment = 0f, unclampedFlashAlpha = 0f, flashAlpha = 0f, accumulator = 0f;
         private static ushort updateCounter = 0;
         private static bool shouldUpload = true, shouldJitter = false;
-        private static GameUIElement? hungerbar;
-        private static FoodItem? selectedFood;
+        private static FoodItem? heldFood;
         private static FoodItem? hoveredFood;
         private static sbyte alphaDir = 1;
         private static GameMode gamemode;
@@ -57,14 +53,7 @@ namespace AppleSkin
         static Rect uvRectWhole;
         static Rect uvRectHalf;
         static string CurrentHoverText = string.Empty;
-        static readonly Dictionary<string, float> saturationLevels = new()
-        {
-            { "poor", 0.1f },
-            { "low", 0.3f },
-            { "normal", 0.6f },
-            { "good", 0.8f },
-            { "supernatural", 1.2f }
-        };
+        
         public static AppleSkin Instance { get; private set; } = null!;
         public static AppleSkinConfig Config { get; private set; } = null!;
 
@@ -76,7 +65,7 @@ namespace AppleSkin
             //base.WaitForDebuggerToBeAttached();
 #endif
         }
-
+    
         protected override void OnLoaded()
         {
             Console.WriteLine("Gaming");
@@ -115,16 +104,18 @@ namespace AppleSkin
             return pos;
         }
 
-        static readonly byte[] food = Encoding.UTF8.GetBytes("minecraft:food");
+        
 
         private void OnTick()
         {
             if (Onix.LocalPlayer is not LocalPlayer localPlayer || Onix.Gui.ScreenName != hudScreen) return;
-
+            
             if (localPlayer.GetAttribute(EntityAttributeId.Saturation) is EntityAttribute s) saturation = s.Value;
             if (localPlayer.GetAttribute(EntityAttributeId.Hunger) is EntityAttribute h) hunger = h.Value;
-            if (localPlayer.GetAttribute(EntityAttributeId.Exhaustion) is EntityAttribute rawExhaustion)
-                exhaustion = Math.Min(rawExhaustion.Value, 4) / 4;
+            if (localPlayer.GetAttribute(EntityAttributeId.Exhaustion) is EntityAttribute rawExhaustion) {
+                exhaustion_percent = Math.Min(rawExhaustion.Value, 4) / 4;
+                exhaustion = rawExhaustion.Value;
+            }
             gamemode = localPlayer.GameMode;
             bool isOnHunger = localPlayer.Effects.Any(e => e.Id == MobEffectId.Hunger);
 
@@ -137,61 +128,27 @@ namespace AppleSkin
             uvRectHalf = Rect.FromSize(new(61 + UVXOffset, 27), size).NormalizeWith(256f);
             if (hungerbar?.Position.X < Onix.Gui.ScreenSize.X || hungerbar == null || hungerbar.Parent!.JsonProperties.Contains(visibleFalse))
                 Reload();
-
-            if (!GetFoodItem(localPlayer.MainHandItem.Item, out selectedFood) || (!selectedFood.AlwaysConsumable && hunger == 20))
-                selectedFood = new FoodItem { Hunger = 0, Saturation = 0f };
-
+            var item = localPlayer.MainHandItem.Item;
+            if (!FoodHelper.GetFoodItem(item, out heldFood) || (!(heldFood.AlwaysConsumable || item!.Name == "apple") && hunger == 20))
+                heldFood = new FoodItem { Hunger = 0, Saturation = 0f };
+            health_increment = FoodHelper.GetEstimatedHealthIncrement(heldFood);
             unclampedFlashAlpha += alphaDir * 0.125f;
             if (unclampedFlashAlpha >= 1.5f)
                 alphaDir = -1;
             else if (unclampedFlashAlpha <= -0.5f)
                 alphaDir = 1;
-            flashAlpha = MathF.Max(0F, MathF.Min(1F, unclampedFlashAlpha)) * MathF.Max(0F, MathF.Min(1F, .65f));
-            shouldJitter = saturation <= 0f && updateCounter % (hunger * 3 + 1) == 0;
-        }
-
-        private static bool GetFoodItem(Item? item, out FoodItem output)
-        {
-            if (item == null)
-            {
-                output = new FoodItem { Hunger = 0, Saturation = 0f, AlwaysConsumable = false };
-                return false;
-            }
-            var prefix = $"{item.Namespace}_".Replace("minecraft_", "");
-            var path = $"items/{prefix}{item.Name}.json";
-            var jsonData = Onix.Game.PackManagerBehavior.LoadContent(TexturePath.Game(path));
-            bool isFood = jsonData.AsSpan().IndexOf(food) >= 0;
-            if (isFood)
-            {
-                JsonDocument doc = JsonDocument.Parse(jsonData);
-                JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("minecraft:item", out JsonElement foodItem) &&
-                    foodItem.TryGetProperty("components", out JsonElement components) &&
-                    components.TryGetProperty("minecraft:food", out JsonElement food))
-                {
-                    var rawSaturation = food.GetProperty("saturation_modifier");
-                    float saturation_modifier = rawSaturation.ValueKind == JsonValueKind.String
-                        ?  saturationLevels.GetValueOrDefault(rawSaturation.GetString() ?? "normal", 0.6f)
-                        : rawSaturation.GetSingle();
-                    int nutrition = food.GetProperty("nutrition").GetInt32();
-
-                    var canAlwaysEat = food.TryGetProperty(Encoding.UTF8.GetBytes("can_always_eat"), out JsonElement cae) && cae.GetBoolean();
-                    output = new FoodItem { Hunger = nutrition, Saturation = nutrition * (saturation_modifier * 2), AlwaysConsumable = canAlwaysEat };
-                    return true;
-                }
-            }
-
-            output = new FoodItem { Hunger = 0, Saturation = 0f, AlwaysConsumable = false };
-            return false;
+            flashAlpha = MathF.Max(0F, MathF.Min(1F, unclampedFlashAlpha)) * MathF.Max(0F, MathF.Min(1F, Config.MaxFlashingHudIconAlpha));
+            shouldJitter = saturation <= 0f && updateCounter % (hunger * 3 + 1) == 0 && Config.AnimateHudIcons;
         }
 
         private void OnContainerScreenTick(ContainerScreen container)
         {
+            if ((!Config.ShowFoodValuesInTooltip || !isHoldingShift) && !Config.AlwaysShowFoodValuesInTooltip) return;
             if (container.GetHoveredItem() is ItemStack item && hoveredFood?.GetHashCode() != item.GetHashCode())
             {
-                try //amazing
+                try
                 {
-                    bool isFood = item.Item is {} food && GetFoodItem(food, out hoveredFood);
+                    bool isFood = item.Item is {} food && FoodHelper.GetFoodItem(food, out hoveredFood);
                     if (!isFood) hoveredFood = null;
                     else GetHoveredText(Onix.Gui.RootUiElement!);
                 }
@@ -211,6 +168,7 @@ namespace AppleSkin
 
         private void OnRenderScreenGame(RendererGame gfx, float delta, string screenName, bool isHudHidden, bool isClientUI)
         {
+            if ((!Config.ShowFoodValuesInTooltip || !isHoldingShift) && !Config.AlwaysShowFoodValuesInTooltip) return;
             if (screenName == hudScreen) { hoveredFood = null; scrollOffset = Vec2.Zero; return; }
             if (hoveredFood == null) return;
             gfx.FontType = FontType.Mojangles;
@@ -219,9 +177,7 @@ namespace AppleSkin
             Vec2 itemInfoSize = gfx.MeasureText(CurrentHoverText);
             int hungerMid = (int)MathF.Ceiling(hoveredFood.Hunger / 2f);
             int saturationMid = (int)MathF.Ceiling(hoveredFood.Saturation / 2f);
-            var hungerWidth = 9 * hungerMid;
-            var saturationWidth = 9 * saturationMid;
-            var foodInfoWidth = MathF.Max(hungerWidth, saturationWidth);
+            var foodInfoWidth = MathF.Max(9 * hungerMid, 9 * saturationMid);
             itemInfoSize.X = MathF.Max(itemInfoSize.X, foodInfoWidth);
 
             Vec2 tooltipSize = itemInfoSize + new Vec2(0, 18) + tooltipPadding * 2;
@@ -253,7 +209,7 @@ namespace AppleSkin
             }
 
             Textures.tooltip.Render(gfx, Rect.FromSize(tooltipPos, tooltipSize), 1f);
-            gfx.RenderText(tooltipPos + tooltipPadding, ColorF.White, CurrentHoverText);
+            gfx.RenderText(tooltipPos + tooltipPadding + new Vec2(0.4f, 0.15f), ColorF.White, CurrentHoverText);
 
             CacheOutline(gfx, uvRectWhole, Textures.normal_outline);
 
@@ -286,21 +242,21 @@ namespace AppleSkin
 
         private static void RenderHungerBar(RendererGame gfx, float delta)
         {
-            if (!(gamemode == GameMode.Survival || gamemode == GameMode.Adventure) || (accumulator += delta) < FrameThreshold || selectedFood == null) return;
+            if (!(gamemode == GameMode.Survival || gamemode == GameMode.Adventure) || (accumulator += delta) < FrameThreshold || heldFood == null) return;
 
             CacheOutline(gfx, uvRectWhole, outline);
 
-            float expectedHunger = MathF.Min(hunger + selectedFood.Hunger, 20f);
-            float expectedSaturation = MathF.Min(MathF.Min(expectedHunger, saturation + selectedFood.Saturation), 20f);
-
-            float exhaustionWidth = MathF.Round(ExhaustionWidth * exhaustion);
-            float x = hungerbar_pos.X;
-            float y = hungerbar_pos.Y;
-            float left = Full - exhaustionWidth / ExhaustionWidth;
-            gfx.RenderTexture(new(x - exhaustionWidth, y , x, y + 9), Textures.exhaustion_background, .7f, new(left, 0f, Full, Full));
-
-            bool renderExpectedHunger = expectedHunger != hunger;
-            bool renderExpectedSaturation = expectedSaturation != saturation;
+            float expectedHunger = MathF.Min(hunger + heldFood.Hunger, 20f);
+            float expectedSaturation = MathF.Min(MathF.Min(expectedHunger, saturation + heldFood.Saturation), 20f);
+            if (Config.ShowExhaustionOverlay){
+                float exhaustionWidth = MathF.Round(ExhaustionWidth * exhaustion_percent);
+                float x = hungerbar_pos.X;
+                float y = hungerbar_pos.Y;
+                float left = Full - exhaustionWidth / ExhaustionWidth;
+                gfx.RenderTexture(new(x - exhaustionWidth, y, x, y + 9), Textures.exhaustion_background, .7f, new(left, 0f, Full, Full));
+            }
+            bool renderExpectedHunger = Config.ShowHungerRestoredFromHeldFood && expectedHunger != hunger;
+            bool renderExpectedSaturation = Config.ShowHungerRestoredFromHeldFood && expectedSaturation != saturation;
 
             for (int i = 0; i < 10; ++i)
             {
@@ -308,12 +264,14 @@ namespace AppleSkin
                 gfx.RenderTexture(rect, Textures.icons, 1f, uvRectBackground);
 
                 int idk = (i << 1) | 1;
-                RenderHunger(gfx, uvRectWhole, uvRectHalf, rect, idk, hunger, 1f);
                 if (renderExpectedHunger)
                     RenderHunger(gfx, uvRectWhole, uvRectHalf, rect, idk, expectedHunger, flashAlpha);
-                RenderSaturation(gfx, outline, rect, idk, saturation, ColorF.Yellow);
+                RenderHunger(gfx, uvRectWhole, uvRectHalf, rect, idk, hunger, 1f);
+                
+                if (!Config.ShowSaturationOverlay) continue;
                 if (renderExpectedSaturation)
                     RenderSaturation(gfx, outline, rect, idk, expectedSaturation, ColorF.Lerp(ColorF.Transparent, ColorF.Yellow, flashAlpha));
+                RenderSaturation(gfx, outline, rect, idk, saturation, ColorF.Yellow);
             }
             updateCounter++;
             accumulator = 0;
@@ -354,24 +312,14 @@ namespace AppleSkin
         {
             Stack<GameUIElement> stack = new();
             stack.Push(element);
-
             while (stack.Count > 0)
             {
                 var current = stack.Pop();
-
-                if (what(current) && !found(current))
-                    return false;
-
-                var children = current.Children;
-                if (children != null && children.Length > 0)
-                {
+                if (what(current) && !found(current)) return false;
+                if (current.Children is { Length: >0 } children)
                     for (int i = children.Length - 1; i >= 0; i--)
-                    {
                         stack.Push(children[i]);
-                    }
-                }
             }
-
             return true;
         }
 
@@ -391,7 +339,7 @@ namespace AppleSkin
                     if (match.Success)
                     {
                         CurrentHoverText = match.Groups[1].Value.Replace("\\n", "\n");
-                        e.JsonProperties = "{}";
+                        //e.JsonProperties = "{}";
                     }
                     return true;
                 });
@@ -402,10 +350,13 @@ namespace AppleSkin
             if (Onix.Gui.RootUiElement is GameUIElement root){
                 if (GetElement(root, e => e.Name == "hunger_rend" && e.Parent!.JsonProperties.Contains(visibleTrue), element =>
                 {
-                    //Onix.Gui.RelayoutScreen();
+                    Onix.Gui.RelayoutScreen();
                     hungerbar = element;
+                    healthbar = element.Parent!.Children.FirstOrDefault(e => e.Name == "heart_rend");
                     hungerbar_pos = GetAbsolutePosition(element);
+                    healthbar_pos = GetAbsolutePosition(healthbar!);
                     element.Position *= 69;
+                    healthbar!.Position *= 69;
                     return false;
                 })) hungerbar = null;
             }
@@ -413,7 +364,7 @@ namespace AppleSkin
 
         protected override void OnDisabled()
         {
-            //Onix.Gui.RelayoutScreen();
+            Onix.Gui.RelayoutScreen();
             Console.WriteLine("Disabled");
         }
 
