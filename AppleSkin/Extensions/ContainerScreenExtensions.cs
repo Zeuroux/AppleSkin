@@ -1,7 +1,7 @@
 ﻿using OnixRuntime.Api.Items;
 using OnixRuntime.Api.UI;
 
-namespace AppleSkin
+namespace AppleSkin.Extensions
 {
     public static class ContainerScreenExtensions
     {

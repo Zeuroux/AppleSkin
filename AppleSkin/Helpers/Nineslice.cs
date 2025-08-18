@@ -4,7 +4,7 @@ using OnixRuntime.Api;
 using OnixRuntime.Api.Maths;
 using OnixRuntime.Api.Rendering;
 
-namespace AppleSkin;
+namespace AppleSkin.Helpers;
 
 public class NineSlice
 {

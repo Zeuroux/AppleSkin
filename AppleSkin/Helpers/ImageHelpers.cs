@@ -1,7 +1,7 @@
 ﻿using OnixRuntime.Api.Maths;
 using OnixRuntime.Api.Utils;
 
-namespace AppleSkin
+namespace AppleSkin.Helpers
 {
     internal static class ImageHelpers
     {

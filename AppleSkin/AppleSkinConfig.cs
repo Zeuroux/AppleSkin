@@ -2,6 +2,12 @@ using OnixRuntime.Api.OnixClient;
 using OnixRuntime.Api.Rendering;
 namespace AppleSkin {
     public partial class AppleSkinConfig : OnixModuleSettingRedirector {
+        [Button(nameof(Fubction), "Amazing button")]
+        public partial OnixSetting.SettingChangedDelegate bUTTON { get; set; }
+        void Fubction() {
+            Console.WriteLine("Button pressed!");
+        }
+
         [Value(true)]
         [Name("Show food values in tooltip", "If true, shows the hunger and saturation values of food in its tooltip while holding Show food values in tooltip SHIFT")]
         public partial bool ShowFoodValuesInTooltip { get; set; }
