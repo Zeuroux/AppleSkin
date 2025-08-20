@@ -1,5 +1,6 @@
 using AppleSkin.Extensions;
 using AppleSkin.Helpers;
+using AppleSkin.TextureUV;
 using OnixRuntime.Api;
 using OnixRuntime.Api.Entities;
 using OnixRuntime.Api.Inputs;
@@ -9,35 +10,39 @@ using OnixRuntime.Api.Rendering;
 using OnixRuntime.Api.UI;
 using OnixRuntime.Api.Utils;
 using OnixRuntime.Plugin;
+using System.Diagnostics;
+using System.Diagnostics.SymbolStore;
 
 namespace AppleSkin
 {
     public class AppleSkin : OnixPluginBase
     {
-        private const float FrameThreshold = 1 / 60;
+        private static TexturePath? Outline;
+
+        private const float ExhaustionWidth = 80f;
+        private const float Full = 1f;
+
         private const string visibleTrue = "\"#visible\":true";
+        private const string hudScreen = "hud_screen";
+
         private static readonly Random rand = new();
-        private static readonly Vec2 tooltipPadding = new(4f, 4f);
-        private static readonly Vec2 tooltipOffset = new(10, -10);
         private static readonly Vec2 size = new(9);
-        private static GameUIElement? hovered;
+
+        private static float unclampedFlashAlpha = 0f, flashAlpha = 0f;
+        private static sbyte alphaDir = 1;
+
+        private static ushort UpdateCounter = 0;
+        private static bool ShouldJitter = false;
+
+        private static float exhaustion_percent = 0f, health_increment = 0f;
+        private static FoodItem? heldFood;
+        private static GameMode Gamemode;
+        private static bool HasHungerEffect = false;
+
+
         private static HudElements? AttributeBars;
         private static HudAttributes PlayerAttributes = new();
-        private static float exhaustion_percent = 0f, health_increment = 0f, unclampedFlashAlpha = 0f, flashAlpha = 0f, accumulator = 0f;
-        private static ushort updateCounter = 0;
-        private static bool shouldUpload = true, shouldJitter = false;
-        private static FoodItem? heldFood, hoveredFood;
-        private static sbyte alphaDir = 1;
-        private static GameMode gamemode;
-        private static bool scrollable = false;
-        private static Vec2 scrollOffset = Vec2.Zero;
-        private static bool isHoldingShift = false;
-        private const float ExhaustionWidth = 81f;
-        private const float Full = 1f;
-        private const string hudScreen = "hud_screen";
-        static TexturePath? outline;
-        static string CurrentHoverText = string.Empty;
-        
+
         public static AppleSkin Instance { get; private set; } = null!;
         public static AppleSkinConfig Config { get; private set; } = null!;
 
@@ -65,37 +70,26 @@ namespace AppleSkin
         private void OnSessionLeave()
         {
             AttributeBars = null;
-            hovered = null;
         }
-
-        private bool OnInput(InputKey key, bool isDown)
-        {
-            if (key == InputKey.Type.Scroll && hoveredFood is {} && scrollable)
-            {
-                (isHoldingShift ? ref scrollOffset.X : ref scrollOffset.Y) += (isDown ? 1 : -1) * 9;
-                return true;
-            }
-            else if (key == InputKey.Type.Shift)
-                isHoldingShift = isDown;
-            return false;
-        }
-
-        private static bool HasHungerEffect = false;
-
 
         private void OnTick()
         {
             if (Onix.Gui.ScreenName != hudScreen) return;
             if (Onix.LocalPlayer is not LocalPlayer localPlayer) return;
             HasHungerEffect = localPlayer.Effects.Any(e => e.Id == MobEffectId.Hunger);
-            outline = HasHungerEffect ? Textures.hungered_outline : Textures.normal_outline;
-            if (localPlayer.GetAttribute(EntityAttributeId.Saturation) is EntityAttribute s) PlayerAttributes.Saturation = s.Value;
-            if (localPlayer.GetAttribute(EntityAttributeId.Hunger) is EntityAttribute h) PlayerAttributes.Hunger = (int)h.Value;
+            Outline = HasHungerEffect ? Textures.hungered_outline : Textures.normal_outline;
+            if (localPlayer.GetAttribute(EntityAttributeId.Health) is EntityAttribute health) { 
+                PlayerAttributes.Health = (int)health.Value;
+                PlayerAttributes.HealthMax = (int)health.MaxValue;
+                Console.WriteLine(health.MaxValue);
+            }
+            if (localPlayer.GetAttribute(EntityAttributeId.Saturation) is EntityAttribute saturation) PlayerAttributes.Saturation = saturation.Value;
+            if (localPlayer.GetAttribute(EntityAttributeId.Hunger) is EntityAttribute hunger) PlayerAttributes.Hunger = (int)hunger.Value;
             if (localPlayer.GetAttribute(EntityAttributeId.Exhaustion) is EntityAttribute rawExhaustion) {
                 exhaustion_percent = Math.Min(rawExhaustion.Value, 4) / 4;
                 PlayerAttributes.Exhaustion = rawExhaustion.Value;
             }
-            gamemode = localPlayer.GameMode;
+            Gamemode = localPlayer.GameMode;
             if (AttributeBars == null)
                 AttributeBars = new();
             else
@@ -110,17 +104,121 @@ namespace AppleSkin
             else if (unclampedFlashAlpha <= -0.5f)
                 alphaDir = 1;
             flashAlpha = MathF.Max(0F, MathF.Min(1F, unclampedFlashAlpha)) * MathF.Max(0F, MathF.Min(1F, Config.MaxFlashingHudIconAlpha));
-            shouldJitter = PlayerAttributes.Saturation <= 0f && updateCounter % (PlayerAttributes.Hunger * 3 + 1) == 0 && Config.AnimateHudIcons;
+            ShouldJitter = PlayerAttributes.Saturation <= 0f && UpdateCounter % (PlayerAttributes.Hunger * 3 + 1) == 0 && Config.AnimateHudIcons;
         }
 
-        ItemStack? lastItemStack;
-        int lastSlot = -1;
+        private void OnPreRenderScreenGame(RendererGame gfx, float delta, string screenName, bool isHudHidden, bool isClientUi)
+        {
+            if (!(Gamemode == GameMode.Survival || Gamemode == GameMode.Adventure)) return;
+            if (Outline == null) return;
+            CacheOutline(gfx, HungerTextureUV.Whole(HasHungerEffect), Outline);
+            if (screenName != hudScreen || AttributeBars == null) return;
+            if (AttributeBars == null || heldFood == null) return;
+            RenderHungerBar(gfx, AttributeBars.Hunger, heldFood);
+            RenderHealthBar(gfx, AttributeBars.Armor, heldFood);
+        }
+
+        private static void RenderHealthBar(RendererGame gfx, Vec2 position, FoodItem heldFood)
+        {
+            var healthMid = MathF.Ceiling(PlayerAttributes.HealthMax / 2);
+            var Background = HungerTextureUV.Background();
+
+            for (int i = 0; i < healthMid; i++)
+            {
+                var x = i % 10 * 8;
+                var y = MathF.Floor(i / 10) * -10;
+                var rect = Rect.FromSize(position, size).MoveBy(x , y);
+                gfx.RenderTexture(rect, Textures.icons, 1f, Background);
+
+            }
+        }
+
+        private static void RenderHungerBar(RendererGame gfx, Vec2 position, FoodItem heldFood)
+        {
+            
+            float expectedHunger = MathF.Min(PlayerAttributes.Hunger + heldFood.Hunger, 20f);
+            float expectedSaturation = MathF.Min(MathF.Min(expectedHunger, PlayerAttributes.Saturation + heldFood.Saturation), 20f);
+            if (Config.ShowExhaustionOverlay)
+            {
+                float exhaustionWidth = MathF.Round(ExhaustionWidth * exhaustion_percent);
+                float x = position.X;
+                float y = position.Y;
+                float left = Full - exhaustionWidth / ExhaustionWidth;
+                gfx.RenderTexture(new(x - exhaustionWidth, y, x + 1, y + 9), Textures.exhaustion_background, .7f, new(left, 0f, Full, Full));
+            }
+
+            bool renderExpectedHunger = Config.ShowHungerRestoredFromHeldFood && expectedHunger != PlayerAttributes.Hunger;
+            bool renderExpectedSaturation = Config.ShowHungerRestoredFromHeldFood && expectedSaturation != PlayerAttributes.Saturation;
+            var Background = HungerTextureUV.Background(HasHungerEffect);
+            var Whole = HungerTextureUV.Whole(HasHungerEffect);
+            var Half = HungerTextureUV.Half(HasHungerEffect);
+            for (int i = 0; i < 10; i++)
+            {
+                Rect rect = Rect.FromSize(position, size).MoveBy((-i - 1) * 8, ShouldJitter ? -rand.Next(2) : 0);
+                gfx.RenderTexture(rect, Textures.icons, 1f, Background);
+
+                int idk = (i << 1) | 1;
+                if (renderExpectedHunger)
+                    IconRender.Hunger(gfx, Whole, Half, rect, idk, expectedHunger, flashAlpha);
+                IconRender.Hunger(gfx, Whole, Half, rect, idk, PlayerAttributes.Hunger, 1f);
+
+                if (!Config.ShowSaturationOverlay) continue;
+                if (renderExpectedSaturation)
+                    IconRender.Saturation(gfx, Outline!, rect, idk, expectedSaturation, ColorF.Lerp(ColorF.Transparent, ColorF.Yellow, flashAlpha));
+                IconRender.Saturation(gfx, Outline!, rect, idk, PlayerAttributes.Saturation, ColorF.Yellow);
+            }
+            UpdateCounter++;
+        }
+
+        // Mainly tooltip stuff
+
+        private static bool StartScrolling = false;
+        private static Vec2 ScrollOffset = Vec2.Zero;
+        private static Vec2 TargetScrollOffset = Vec2.Zero;
+        private static bool ScrollHorizontally = false;
+
+        private static GameUIElement? Hovered;
+        private static Rect? HoveredRect;
+        private static FoodItem? HoveredFood;
+        private static string CurrentHoverText = string.Empty;
+        private static ItemStack? lastItemStack;
+        private static int lastSlot = -1;
+        private static void ResetHovered()
+        {
+            Hovered = null;
+            HoveredRect = null;
+            HoveredFood = null;
+        }
+
+        private static readonly float lerpSpeed = 10f;
+
+        private bool OnInput(InputKey key, bool isDown)
+        {
+            if (!Onix.Client.Modules.First(M => M.SaveName == "module.better_tooltips.name").Enabled)
+                return false;
+
+            if (key == InputKey.Type.Ctrl)
+            {
+                StartScrolling = isDown;
+                if (!isDown)
+                    TargetScrollOffset = Vec2.Zero;
+            }
+            else if (key == InputKey.Type.Shift)
+                ScrollHorizontally = isDown;
+            if (HoveredFood is { } && key == InputKey.Type.Scroll)
+                if (StartScrolling)
+                    (ScrollHorizontally ? ref TargetScrollOffset.X : ref TargetScrollOffset.Y) += isDown ? 10 : -10;
+                else return true;
+
+            return false;
+        }
         private void OnContainerScreenTick(ContainerScreen container)
         {
-            if ((!Config.ShowFoodValuesInTooltip || !isHoldingShift) && !Config.AlwaysShowFoodValuesInTooltip) return;
+            if ((!Config.ShowFoodValuesInTooltip || !ScrollHorizontally) && !Config.AlwaysShowFoodValuesInTooltip) return;
+
             if (container.GetHoveredItem() is ItemStack itemStack && (lastSlot != container.HoveredSlot || !itemStack.Matches(lastItemStack)))
             {
-                if (itemStack.Item is {} food && FoodHelper.GetFoodItem(food, out hoveredFood))
+                if (itemStack.Item is { } food && FoodHelper.GetFoodItem(food, out HoveredFood))
                 {
                     Onix.Gui.RootUiElement!.FindMatchRecursive(
                         what: e => e.Name == "hover_text" &&
@@ -133,7 +231,7 @@ namespace AppleSkin
                         whenFound: e => {
                             if (e.Parent?.Parent?.Parent?.Parent?.FindChildRecursive("overlay")?.JsonProperties is { } prop && RegexPatterns.ItemCategoryRegex().Match(prop).Success)
                             {
-                                hoveredFood = null;
+                                ResetHovered();
                                 return true;
                             }
                             var match = RegexPatterns.HoverTextRegex().Match(e.JsonProperties);
@@ -141,83 +239,77 @@ namespace AppleSkin
                             {
                                 CurrentHoverText = match.Groups[1].Value.Replace("\\n", "\n");
                                 e.JsonProperties = "{}";
-                                hovered = e;
+                                if (e.Parent?.Parent?.Parent is { } hover)
+                                    HoveredRect = hover.Rect.MoveTo(hover.GetAbsolutePosition());
+                                Hovered = e;
                             }
-
                             return true;
                         });
                 }
-                else hoveredFood = null;
-                scrollOffset = Vec2.Zero;
+                else ResetHovered();
+                TargetScrollOffset = Vec2.Zero;
                 lastSlot = container.HoveredSlot;
                 lastItemStack = itemStack.Clone();
             }
-            if (hovered != null)
+            if (Hovered != null)
             {
-                if (hovered.JsonProperties != "{}")
-                    hovered.JsonProperties = "{}";
-                if (hovered is { Parent.Rect: not { Width: > 0, Height: > 0 } })
+                if (Hovered.JsonProperties != "{}")
+                    Hovered.JsonProperties = "{}";
+                if (Hovered is { Parent.Rect: not { Width: > 0, Height: > 0 } })
                 {
-                    hoveredFood = null;
+                    ResetHovered();
                     lastItemStack = null;
-                    scrollOffset = Vec2.Zero;
+                    TargetScrollOffset = Vec2.Zero;
                     return;
                 }
             }
         }
-
-        private void OnPreRenderScreenGame(RendererGame gfx, float delta, string screenName, bool isHudHidden, bool isClientUi)
-        {
-            if (outline == null) return;
-            CacheOutline(gfx, HungerTextureUV.Whole(HasHungerEffect), outline);
-            if (screenName != hudScreen || AttributeBars == null) return;
-            RenderHungerBar(gfx, delta);
-        }
-
         private void OnRenderScreenGame(RendererGame gfx, float delta, string screenName, bool isHudHidden, bool isClientUI)
         {
-            if ((!Config.ShowFoodValuesInTooltip || !isHoldingShift) && !Config.AlwaysShowFoodValuesInTooltip) return;
-            if (screenName == hudScreen) { hoveredFood = null; }
-            if (hoveredFood == null) return;
+            if ((!Config.ShowFoodValuesInTooltip || !ScrollHorizontally) && !Config.AlwaysShowFoodValuesInTooltip) return;
+            if (HoveredFood == null) return;
+            if (screenName == hudScreen) { ResetHovered(); return; }
+            ScrollOffset = ScrollOffset.Lerp(TargetScrollOffset, MathF.Min(lerpSpeed * delta, 1f));
             gfx.FontType = FontType.Mojangles;
-            Vec2 mousePosition = Onix.Gui.MousePosition;
-            Vec2 tooltipPos = mousePosition + tooltipOffset;
+            Vec2 startPosition = Onix.Gui.MousePosition;
+            var tooltipOffset = TooltipSizes.Offset;
+            bool add10 = true; 
+            if (HoveredRect is {} hoveredRect && hoveredRect.Contains(startPosition) == false)
+            {
+                tooltipOffset = Vec2.Zero;
+                startPosition = hoveredRect.Center;
+            }
+            Vec2 tooltipPos = startPosition + tooltipOffset;
             Vec2 itemInfoSize = gfx.MeasureText(CurrentHoverText);
-            int hungerMid = (int)MathF.Ceiling(hoveredFood.Hunger / 2f);
-            int saturationMid = (int)MathF.Ceiling(hoveredFood.Saturation / 2f);
+            int hungerMid = (int)MathF.Ceiling(HoveredFood.Hunger / 2f);
+            int saturationMid = (int)MathF.Ceiling(HoveredFood.Saturation / 2f);
             var foodInfoWidth = MathF.Max(9 * hungerMid, 9 * saturationMid);
             itemInfoSize.X = MathF.Max(itemInfoSize.X, foodInfoWidth);
 
-            Vec2 tooltipSize = itemInfoSize + new Vec2(0, 18) + tooltipPadding * 2;
+            Vec2 tooltipSize = itemInfoSize + new Vec2(0, 18) + TooltipSizes.Padding * 2;
 
             Vec2 screenSize = Onix.Gui.ScreenSize;
+            
             if ((tooltipPos.X += tooltipPos.X + tooltipSize.X > screenSize.X ? -tooltipSize.X - tooltipOffset.X * 2 : 0) < 0)
             {
                 tooltipPos.X += tooltipSize.X / 2 + tooltipOffset.X;
                 tooltipPos.Y -= tooltipSize.Y + tooltipOffset.Y;
+                add10 = false;
             }
-
+            if (add10 && tooltipOffset == Vec2.Zero)
+                tooltipPos += new Vec2(10);
+            
             if (tooltipPos.Y + tooltipSize.Y > screenSize.Y)
                 tooltipPos.Y -= tooltipPos.Y + tooltipSize.Y - screenSize.Y;
             else if (tooltipPos.Y < 0)
             {
                 tooltipPos.Y = 0;
-                tooltipPos.X = mousePosition.X + tooltipOffset.X;
+                tooltipPos.X = startPosition.X + tooltipOffset.X;
             }
-
-            scrollable = tooltipSize.Y > screenSize.Y || tooltipSize.X > screenSize.X;
-            if (scrollable)
-            {
-                if (scrollOffset.Y > 0)
-                    scrollOffset.Y = 0;
-                else if (scrollOffset.Y + tooltipSize.Y < screenSize.Y)
-                    scrollOffset.Y = screenSize.Y - tooltipSize.Y;
-
-                tooltipPos += scrollOffset;
-            }
-
+            
+            tooltipPos += ScrollOffset;
             Textures.tooltip.Render(gfx, Rect.FromSize(tooltipPos, tooltipSize), 1f);
-            gfx.RenderText(tooltipPos + tooltipPadding + new Vec2(0.4f, 0.15f), ColorF.White, CurrentHoverText);
+            gfx.RenderText(tooltipPos + TooltipSizes.Padding + new Vec2(0.4f, 0.15f), ColorF.White, CurrentHoverText);
             var Background = HungerTextureUV.Background();
             var Whole = HungerTextureUV.Whole();
             var Half = HungerTextureUV.Half();
@@ -225,17 +317,18 @@ namespace AppleSkin
             for (int i = 0; i < Math.Max(hungerMid, saturationMid); ++i)
             {
                 int value = (i << 1) | 1;
-                Rect rect = Rect.FromSize(tooltipPos + tooltipPadding, size).MoveDown(itemInfoSize.Y);
-                RenderHunger(gfx, Whole, Half, rect.MoveBy(new Vec2(9 * (hungerMid - i - 1), 0)), value, hoveredFood.Hunger, 1f, RenderBackground);
-                RenderSaturation(gfx, Textures.normal_outline, rect.MoveBy(new Vec2(9 * (saturationMid - i - 1), 9)), value, hoveredFood.Saturation, ColorF.Yellow, RenderBackground);
+                Rect rect = Rect.FromSize(tooltipPos + TooltipSizes.Padding, size).MoveDown(itemInfoSize.Y);
+                IconRender.Hunger(gfx, Whole, Half, rect.MoveBy(new Vec2(9 * (hungerMid - i - 1), 0)), value, HoveredFood.Hunger, 1f, RenderBackground);
+                IconRender.Saturation(gfx, Textures.normal_outline, rect.MoveBy(new Vec2(9 * (saturationMid - i - 1), 9)), value, HoveredFood.Saturation, ColorF.Yellow, RenderBackground);
             }
         }
-
+        // End of Mainly tooltip stuff
         private static void CacheOutline(RendererGame gfx, Rect uvRectWhole, TexturePath outline)
         {
 
-            if (gfx.GetTextureStatus(outline) != RendererTextureStatus.Missing && !shouldUpload) return;
-            
+            if (gfx.GetTextureStatus(outline) != RendererTextureStatus.Missing) return;
+            AttributeBars = new();
+
             RawImageData hungerWhole = ImageHelpers.CropUV(RawImageData.Load(Onix.Game.PackManager.LoadContent(Textures.icons)), uvRectWhole);
 
             int width = hungerWhole.Width;
@@ -246,76 +339,11 @@ namespace AppleSkin
                 hungerWhole.GetPixel(0, y).A > 0 || hungerWhole.GetPixel(width - 1, y).A > 0);
 
             gfx.UploadTexture(outline, ImageHelpers.CreateOutline(hungerWhole, touchesEdge));
-            shouldUpload = false;
-        }
-
-        private static void RenderHungerBar(RendererGame gfx, float delta)
-        {
-            if (AttributeBars == null) return;
-            if (!(gamemode == GameMode.Survival || gamemode == GameMode.Adventure) || (accumulator += delta) < FrameThreshold || heldFood == null) return;
-            float expectedHunger = MathF.Min(PlayerAttributes.Hunger + heldFood.Hunger, 20f);
-            float expectedSaturation = MathF.Min(MathF.Min(expectedHunger, PlayerAttributes.Saturation + heldFood.Saturation), 20f);
-            if (Config.ShowExhaustionOverlay){
-                float exhaustionWidth = MathF.Round(ExhaustionWidth * exhaustion_percent);
-                float x = AttributeBars.Hunger.X;
-                float y = AttributeBars.Hunger.Y;
-                float left = Full - exhaustionWidth / ExhaustionWidth;
-                gfx.RenderTexture(new(x - exhaustionWidth, y, x, y + 9), Textures.exhaustion_background, .7f, new(left, 0f, Full, Full));
-            }
-
-            bool renderExpectedHunger = Config.ShowHungerRestoredFromHeldFood && expectedHunger != PlayerAttributes.Hunger;
-            bool renderExpectedSaturation = Config.ShowHungerRestoredFromHeldFood && expectedSaturation != PlayerAttributes.Saturation;
-            var Background = HungerTextureUV.Background(HasHungerEffect);
-            var Whole = HungerTextureUV.Whole(HasHungerEffect);
-            var Half = HungerTextureUV.Half(HasHungerEffect);
-            for (int i = 0; i < 10; ++i)
-            {
-                Rect rect = Rect.FromSize(AttributeBars.Hunger, size).MoveBy(new(-i * 8 - 8, shouldJitter ? -rand.Next(2) : 0));
-                gfx.RenderTexture(rect, Textures.icons, 1f, Background);
-
-                int idk = (i << 1) | 1;
-                if (renderExpectedHunger)
-                    RenderHunger(gfx, Whole, Half, rect, idk, expectedHunger, flashAlpha);
-                RenderHunger(gfx, Whole, Half, rect, idk, PlayerAttributes.Hunger, 1f);
-                
-                if (!Config.ShowSaturationOverlay) continue;
-                if (renderExpectedSaturation)
-                    RenderSaturation(gfx, outline!, rect, idk, expectedSaturation, ColorF.Lerp(ColorF.Transparent, ColorF.Yellow, flashAlpha));
-                RenderSaturation(gfx, outline!, rect, idk, PlayerAttributes.Saturation, ColorF.Yellow);
-            }
-            updateCounter++;
-            accumulator = 0;
-        }
-
-        private static void RenderHunger(RendererCommon2D gfx, Rect uvRectWhole, Rect uvRectHalf, Rect rect, int idk, float hunger, float alpha, Action<Rect>? Before = null)
-        {
-            if (idk > hunger) return;
-            Before?.Invoke(rect);
-            gfx.RenderTexture(rect, Textures.icons, alpha, idk == hunger ? uvRectHalf : uvRectWhole);
-        }
-
-        private static void RenderSaturation(RendererCommon2D gfx, TexturePath outline, Rect rect, int idk, float saturation, ColorF color, Action<Rect>? Before = null)
-        {
-            var floorSat = MathF.Floor(saturation);
-            var rounded = floorSat % 2 == 0 ? floorSat + 1 : floorSat;
-            if (idk > rounded) return;
-            float pixelWidth = MathF.Round(9 * ((saturation != rounded) ? (saturation - floorSat) : .6f));
-            bool notWhole = idk == rounded;
-            if (pixelWidth == 0 && notWhole) return;
-            Before?.Invoke(rect);
-            if (notWhole)
-            {
-                rect.X += 9 - pixelWidth;
-                rect.Width = pixelWidth;
-            }
-
-            gfx.RenderTexture(rect, outline, color, new(notWhole ? 1f - (pixelWidth / 9) : 0, 0, 1, 1));
         }
 
         protected override void OnEnabled()
         {
             AttributeBars = new();
-            shouldUpload = true;
         }
 
         protected override void OnDisabled()

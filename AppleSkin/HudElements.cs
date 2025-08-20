@@ -31,9 +31,8 @@ namespace AppleSkin
                 GetProfile();
             if (_armor == null || _health == null || _hunger == null)
                 return;
-            if (!IsLimbo(_armor.Position) || !IsLimbo(_health.Position) || !IsLimbo(_hunger.Position)) {
+            if (!IsLimbo(_armor.Position) || !IsLimbo(_health.Position) || !IsLimbo(_hunger.Position))
                 ReloadPosition();
-            }
         }
 
         private static bool IsLimbo(Vec2 pos) => pos == Limbo;
@@ -52,7 +51,7 @@ namespace AppleSkin
 
         private void GetProfile()
         {
-            Onix.Gui.RootUiElement!.FindMatchRecursive(e => e.Name == "hunger_rend" && e.Parent!.JsonProperties.Contains(visibleTrue), element => {
+            Onix.Gui.RootUiElement?.FindMatchRecursive(e => e.Name == "hunger_rend" && e.Parent!.JsonProperties.Contains(visibleTrue), element => {
                 Onix.Gui.ScheduleScreenRelayout();
                 var profile = element.Parent!;
                 _armor = profile.FindChildRecursive("armor_rend")!;

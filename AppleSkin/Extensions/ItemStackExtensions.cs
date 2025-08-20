@@ -15,10 +15,10 @@ namespace AppleSkin.Extensions
                 stack.Count != other.Count)
                 return false;
 
-            if (stack.Enchants.Length != other.Enchants.Length)
+            if (stack.Enchants.Length != other.Enchants.Length && stack.Enchants.All(e => other.Enchants.Any(oe => oe.Type == e.Type && oe.Level == e.Level)))
                 return false;
 
-            return stack.Enchants.Length == other.Enchants.Length && stack.Enchants.All(e => other.Enchants.Any(oe => oe.Type == e.Type && oe.Level == e.Level));
+            return true;
         }
     }
 }

@@ -1,11 +1,6 @@
 ﻿using OnixRuntime.Api.Maths;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace AppleSkin
+namespace AppleSkin.TextureUV
 {
     public static class HungerTextureUV
     {
