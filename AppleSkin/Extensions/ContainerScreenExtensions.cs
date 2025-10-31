@@ -7,7 +7,7 @@ namespace AppleSkin.Extensions
     {
         public static ItemStack? GetHoveredItem(this ContainerScreen container)
         {
-            return container.HoveringItem ? container.GetItem(container.HoveredContainer, container.HoveredSlot): null;
+            return container.IsHoveringItem ? container.GetItem(container.HoveredContainer, container.HoveredSlot): null;
         }
     }
 }

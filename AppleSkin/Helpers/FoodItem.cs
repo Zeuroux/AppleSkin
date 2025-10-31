@@ -1,7 +1,7 @@
 using AppleSkin.Extensions;
 using static AppleSkin.AppleSkin;
 
-namespace AppleSkin
+namespace AppleSkin.Helpers
 {
     public class Effect
     {
@@ -14,6 +14,8 @@ namespace AppleSkin
     {
         required public int Hunger { get; set; }
         required public float Saturation { get; set; }
+
+        public bool IsValid = true;
         public bool AlwaysConsumable { get; set; } = false;
         public Effect[] Effects { get; set; } = [];
 
@@ -22,7 +24,7 @@ namespace AppleSkin
         private const int MaxFoodLevel = 20;
         private const int HealthRegenThreshold = 18;
         private const int FullHealthThreshold = 20;
-        public float GetEstimatedHealthIncrement(HudAttributes player)
+        public float GetEstimatedHealthIncrement(HungerAttributes player)
         {
             var foodLevel = Math.Min(player.Hunger + Hunger, MaxFoodLevel);
             float healthIncrement = 0;

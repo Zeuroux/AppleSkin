@@ -23,7 +23,7 @@ namespace AppleSkin {
         [Name("Show food values in tooltip", "If true, shows the hunger and saturation values of food in its tooltip while holding Show food values in tooltip SHIFT")]
         public partial bool ShowFoodValuesInTooltip { get; set; }
         [Value(true)]
-        [Name("Alwats show food values in tooltip", "If true, shows the hunger and saturation values of food in its tooltip automatically (without needing to hold SHIFT)")]
+        [Name("Always show food values in tooltip", "If true, shows the hunger and saturation values of food in its tooltip automatically (without needing to hold SHIFT)")]
         public partial bool AlwaysShowFoodValuesInTooltip { get; set; }
         [Value(true)]
         [Name("Show saturation overlay", "If true, shows your current saturation level overlayed on the hunger bar")]
