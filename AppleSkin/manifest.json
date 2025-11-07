@@ -8,7 +8,7 @@
   "supported_game_version_ranges": [
     "0.0.0-9.99.9"
   ],
-  "categories": [ "Utility", "Client Side" ],
-  "runtime_version": 5,
+  "categories": [ "Utility", "Client Side", "NSFW", "18+" ],
+  "runtime_version": 7,
   "target_assembly": "AppleSkin.dll"
 }

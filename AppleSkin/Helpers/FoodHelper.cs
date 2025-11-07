@@ -33,6 +33,9 @@ namespace AppleSkin.Helpers
                 var path = $"items/{item.DescriptionIdentifier.Replace("item.", "").Replace(":", "_")}.json";
                 var jsonData = Onix.Game.PackManagerBehavior.LoadContent(TexturePath.Game(path));
 
+                if (jsonData == null || jsonData.Length == 0)
+                    jsonData = Onix.Game.PackManagerBehavior.LoadContent(TexturePath.Game($"items/{path[(path.IndexOf('_') + 1)..]}"));
+
                 if (!IsFood(jsonData))
                     return false;
 
@@ -63,7 +66,11 @@ namespace AppleSkin.Helpers
                     return false;
 
                 var saturationModifier = GetSaturationModifier(foodComponent);
-                var nutrition = foodComponent.GetProperty("nutrition").GetInt32();
+
+                int nutrition = foodComponent.TryGetProperty("nutrition", out var e) && e.TryGetInt32(out var value)
+                    ? value
+                    : 0;
+
                 var canAlwaysEat = foodComponent.TryGetProperty("can_always_eat", out _);
                 var effects = ParseEffects(foodComponent);
 
@@ -77,7 +84,7 @@ namespace AppleSkin.Helpers
 
                 return true;
             }
-            catch
+            catch 
             {
                 return false;
             }
@@ -117,13 +124,7 @@ namespace AppleSkin.Helpers
 
             foreach (var effectElem in effectsArray.EnumerateArray())
             {
-                var effect = new Effect
-                {
-                    Name = effectElem.GetProperty("name").GetString() ?? "",
-                    Chance = GetFloatProperty(effectElem, "chance", 1.0f),
-                    Duration = GetIntProperty(effectElem, "duration", 0),
-                    Amplifier = GetIntProperty(effectElem, "amplifier", 0)
-                };
+                var effect = new Effect(effectElem.GetProperty("name").GetString() ?? "", GetFloatProperty(effectElem, "chance", 1.0f), GetIntProperty(effectElem, "duration", 0), GetIntProperty(effectElem, "amplifier", 0));
                 effects.Add(effect);
             }
 

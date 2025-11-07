@@ -1,15 +1,8 @@
 using AppleSkin.Extensions;
-using static AppleSkin.AppleSkin;
 
 namespace AppleSkin.Helpers
 {
-    public class Effect
-    {
-        public required string Name { get; set; }
-        public float Chance { get; set; }
-        public int Duration { get; set; }
-        public int Amplifier { get; set; }
-    }
+    public record Effect(string Name, float Chance, int Duration, int Amplifier);
     public class FoodItem
     {
         required public int Hunger { get; set; }
@@ -24,6 +17,28 @@ namespace AppleSkin.Helpers
         private const int MaxFoodLevel = 20;
         private const int HealthRegenThreshold = 18;
         private const int FullHealthThreshold = 20;
+
+        public float GetAbsorptionIncrement()
+        {
+            
+            var absorptionEffect = Array.Find(Effects, e => e.Name == "absorption");
+            if (absorptionEffect == null)
+                return 0f;
+
+            var amplifier = absorptionEffect.Amplifier % 32;
+            return (amplifier + 1) * 4;
+        }
+
+        public float GetHealthBoostIncrement()
+        {
+            var HealthBoostEffect = Array.Find(Effects, e => e.Name == "health_boost");
+            if (HealthBoostEffect == null)
+                return 0f;
+
+            var amplifier = HealthBoostEffect.Amplifier % 32;
+            return (amplifier + 1) * 4;
+        }
+
         public float GetEstimatedHealthIncrement(HungerAttributes player)
         {
             var foodLevel = Math.Min(player.Hunger + Hunger, MaxFoodLevel);

@@ -1,10 +1,4 @@
-﻿using AppleSkin.Extensions;
-using OnixRuntime.Api;
-using OnixRuntime.Api.Maths;
-using OnixRuntime.Api.UI;
-using System.Runtime.InteropServices;
-
-namespace AppleSkin
+﻿namespace AppleSkin
 {
     public struct HungerAttributes
     {
@@ -13,24 +7,34 @@ namespace AppleSkin
         public float Exhaustion;
         public bool HasHungerEffect;
         public ushort UpdateCounter;
+        public bool ShouldJitter;
     }
 
     public struct HealthAttributes
     {
         public int Health;
         public int HealthMax;
+        public int HealthOffset;
         public int Absorption;
+        public int AbsorptionMax;
+        public int AbsorptionOffset;
         public bool IsHardcore;
         public bool IsFreezing;
         public bool HasRegenerationEffect;
         public bool HasWitherEffect;
         public bool HasPoisonEffect;
-        public ushort UpdateCounter;
-        public int AbsorptionOffset;
+        public bool ShouldJitter;
         public int BobIndex;
         public bool Changed;
         public int LastHealth;
         public int LastHealthMax;
         public int LastAbsorption;
+    }
+
+    public struct ArmorAttributes //why
+    {
+        public Dictionary<string, int> Armors = [];
+
+        public ArmorAttributes() { }
     }
 }

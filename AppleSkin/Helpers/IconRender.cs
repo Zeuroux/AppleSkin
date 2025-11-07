@@ -1,42 +1,74 @@
 ﻿using AppleSkin.Stuff;
+using AppleSkin.TextureUV;
 using OnixRuntime.Api.Maths;
 using OnixRuntime.Api.Rendering;
+using System.ComponentModel.Design;
 
 namespace AppleSkin.Helpers
 {
     internal static class IconRender
     {
 
-        public static void Hunger(RendererCommon2D gfx, Rect uvRectWhole, Rect uvRectHalf, Rect rect, int idk, float hunger, float alpha, Action<Rect>? Before = null)
+        public static void Hunger(RendererCommon2D gfx, Rect rect, float alpha, bool half = false, bool hungered = false)
         {
-            if (idk > hunger) return;
-            Before?.Invoke(rect);
-            gfx.RenderTexture(rect, Textures.Icons, alpha, idk == hunger ? uvRectHalf : uvRectWhole);
+            gfx.RenderTexture(rect, Textures.GetHunger(half, hungered), alpha, TextureUV.Hunger.GetHunger(half, hungered));
         }
 
-        public static void Saturation(RendererCommon2D gfx, TexturePath outline, Rect rect, int idk, float saturation, ColorF color, Action<Rect>? Before = null)
+        public static void Saturation(RendererCommon2D gfx, TexturePath outline, Rect rect, int idk, float saturation, ColorF color, float saturationWidth = 9f)
         {
-            var floorSat = MathF.Floor(saturation);
-            var rounded = floorSat % 2 == 0 ? floorSat + 1 : floorSat;
-            if (idk > rounded) return;
-            float pixelWidth = MathF.Round(9 * ((saturation != rounded) ? (saturation - floorSat) : .6f));
-            bool notWhole = idk == rounded;
-            if (pixelWidth == 0 && notWhole) return;
-            Before?.Invoke(rect);
-            if (notWhole)
+            var nearestOdd = (int)(saturation - (saturation % 2) + 1);
+            if (idk > nearestOdd) return;
+            var rectUV = Rect.FullUV;
+            if (idk == nearestOdd)
             {
-                rect.X += 9 - pixelWidth;
-                rect.Width = pixelWidth;
+                float pixelWidth = MathF.Round(saturationWidth * ((saturation / 2) - (int)(saturation / 2)));
+                if (pixelWidth == 0) return;
+                rectUV.X = 1f - (pixelWidth / saturationWidth);
+                rect.X += 9 - 9 * (pixelWidth / saturationWidth);
+                rect.Width = 9 * (pixelWidth / saturationWidth);
             }
 
-            gfx.RenderTexture(rect, outline, color, new(notWhole ? 1f - (pixelWidth / 9) : 0, 0, 1, 1));
+            gfx.RenderTexture(rect, outline, color, rectUV);
         }
 
-        public static void Absorption(RendererCommon2D gfx, Rect uvRectWhole, Rect uvRectHalf, Rect rect, int idk, float hunger, float alpha, Action<Rect>? Before = null)
+        public static void HungerBackground(RendererGame gfx, Rect rect, bool hungered = false)
         {
-            if (idk > hunger) return;
-            Before?.Invoke(rect);
-            gfx.RenderTexture(rect, Textures.Icons, alpha, idk == hunger ? uvRectHalf : uvRectWhole);
+            gfx.RenderTexture(rect, Textures.GetHungerBackground(hungered), 1f, TextureUV.Hunger.GetBackground(hungered));
+        }
+
+        public static void HealthBackground(RendererGame gfx, Rect rect, float alpha, bool flash)
+        {
+            gfx.RenderTexture(rect, Textures.GetHealthBackground(flash), alpha, TextureUV.Health.GetBackground(flash));
+        }
+
+        public static void Absorption(RendererGame gfx, Rect rect, float alpha, bool half, bool hardcore)
+        {
+            gfx.RenderTexture(rect, Textures.GetAbsorption(half, hardcore), alpha, TextureUV.Health.GetAbsorption(half, hardcore));
+        }
+
+        public static void AbsorptionFlash(RendererGame gfx, Rect rect, float alpha, bool half, bool hardcore)
+        {
+            gfx.RenderTexture(rect, Textures.GetAbsorptionFlash(half, hardcore), alpha, TextureUV.Health.GetAbsorptionFlash(half, hardcore));
+        }
+
+        public static void Health(RendererGame gfx, Rect rect, float alpha, bool half, HealthAttributes healthAttrs)
+        {
+            gfx.RenderTexture(rect, Textures.GetHeart(healthAttrs, half), alpha, TextureUV.Health.GetHeart(healthAttrs, half));
+        }
+
+        public static void HealthFlash(RendererGame gfx, Rect rect, float alpha, bool half, HealthAttributes healthAttrs)
+        {
+            gfx.RenderTexture(rect, Textures.GetHeartFlash(healthAttrs, half), alpha, TextureUV.Health.GetHeartFlash(healthAttrs, half));
+        }
+    
+        public static void ArmorEmpty(RendererGame gfx, Rect rect, float alpha)
+        {
+            gfx.RenderTexture(rect, Textures.GetArmorEmpty(), alpha, TextureUV.Armor.GetEmpty());
+        }
+
+        public static void Armor(RendererGame gfx, Rect rect, float alpha, bool half)
+        {
+            gfx.RenderTexture(rect, Textures.GetArmor(half), alpha, TextureUV.Armor.GetArmor(half));
         }
     }
 }

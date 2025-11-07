@@ -45,22 +45,16 @@ public class NineSlice
             byte[] jsonBytes = Onix.Game.PackManager.LoadContent(new TexturePath(jsonPath, Texture.Base));
             string jsonString = System.Text.Encoding.UTF8.GetString(jsonBytes);
 
-            jsonString = jsonString.Trim();
-            if (!jsonString.StartsWith("{") && !jsonString.StartsWith("["))
-            {
-                NineSliceData = new NineSliceJson();
-                return NineSliceData;
-            }
-
             NineSliceJson? jsonData = System.Text.Json.JsonSerializer.Deserialize<NineSliceJson>(jsonString);
-            NineSliceData = jsonData ?? new NineSliceJson();
+            NineSliceData = jsonData ?? throw new Exception($"Failed to deserialize NineSlice JSON data for texture: {Texture}");
+
+            return NineSliceData;
         }
-        catch (Exception ex)
+        catch
         {
             NineSliceData = new NineSliceJson();
+            return NineSliceData;
         }
-
-        return NineSliceData;
     }
 
     public void SetNineSliceData(NineSliceJson jsonData)
@@ -80,12 +74,20 @@ public class NineSlice
         int sliceSize = jsonData.NineSliceSize;
         Vec2 baseSize = jsonData.BaseSize;
 
-        float leftX = rect.X;
-        float centerX = rect.X + sliceSize;
-        float rightX = rect.Z - sliceSize;
-        float topY = rect.Y;
-        float centerY = rect.Y + sliceSize;
-        float bottomY = rect.W - sliceSize;
+        float guiScale = Onix.Gui.GuiScale;
+        float inverseGuiScale = Onix.Gui.GuiScaleInverse;
+
+        float alignedX = inverseGuiScale * (float)Math.Truncate(guiScale * rect.X);
+        float alignedY = inverseGuiScale * (float)Math.Truncate(guiScale * rect.Y);
+        float alignedZ = inverseGuiScale * (float)Math.Truncate(guiScale * rect.Z);
+        float alignedW = inverseGuiScale * (float)Math.Truncate(guiScale * rect.W);
+
+        float leftX = alignedX;
+        float centerX = alignedX + sliceSize;
+        float rightX = alignedZ - sliceSize;
+        float topY = alignedY;
+        float centerY = alignedY + sliceSize;
+        float bottomY = alignedW - sliceSize;
 
         float centerWidth = rightX - centerX;
         float centerHeight = bottomY - centerY;
@@ -144,12 +146,20 @@ public class NineSlice
         int sliceSize = jsonData.NineSliceSize;
         Vec2 baseSize = jsonData.BaseSize;
 
-        float leftX = rect.X;
-        float centerX = rect.X + sliceSize;
-        float rightX = rect.Z - sliceSize;
-        float topY = rect.Y;
-        float centerY = rect.Y + sliceSize;
-        float bottomY = rect.W - sliceSize;
+        float guiScale = Onix.Gui.GuiScale;
+        float inverseGuiScale = Onix.Gui.GuiScaleInverse;
+
+        float alignedX = inverseGuiScale * (float)Math.Truncate(guiScale * rect.X);
+        float alignedY = inverseGuiScale * (float)Math.Truncate(guiScale * rect.Y);
+        float alignedZ = inverseGuiScale * (float)Math.Truncate(guiScale * rect.Z);
+        float alignedW = inverseGuiScale * (float)Math.Truncate(guiScale * rect.W);
+
+        float leftX = alignedX;
+        float centerX = alignedX + sliceSize;
+        float rightX = alignedZ - sliceSize;
+        float topY = alignedY;
+        float centerY = alignedY + sliceSize;
+        float bottomY = alignedW - sliceSize;
 
         float centerWidth = rightX - centerX;
         float centerHeight = bottomY - centerY;

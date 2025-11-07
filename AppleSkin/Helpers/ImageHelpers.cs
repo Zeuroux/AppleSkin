@@ -1,106 +1,77 @@
-﻿using OnixRuntime.Api.Maths;
+﻿//this is ai generated, im too dumb to make this
+using OnixRuntime.Api.Maths;
 using OnixRuntime.Api.Utils;
 
 namespace AppleSkin.Helpers
 {
     internal static class ImageHelpers
     {
-
-        public static RawImageData CreateOutline(RawImageData imageData, bool touchesEdge)
+        public static RawImageData CreateOutline(RawImageData imageData, bool touchesEdge, int thickness = 1)
         {
             int width = imageData.Width;
             int height = imageData.Height;
 
             RawImageData outline = new(width, height);
-            ColorF red = ColorF.White;
+            ColorF outlineColor = ColorF.White;
 
-            bool[] edges = new bool[width * height];
+            bool[,] isEdge = new bool[width, height];
 
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    ColorF pixel = imageData.GetPixel(x, y);
-                    if (pixel.A != 0)
-                    {
-                        if (x == 0) edges[y * width] = true;
-                        if (y == 0) edges[x] = true;
-                        if (x == width - 1) edges[y * width + (width - 1)] = true;
-                        if (y == height - 1) edges[(height - 1) * width + x] = true;
+                    if (imageData.GetPixel(x, y).A == 0)
                         continue;
+
+                    bool edge = false;
+                    for (int dy = -1; dy <= 1 && !edge; dy++)
+                    {
+                        for (int dx = -1; dx <= 1 && !edge; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = x + dx, ny = y + dy;
+
+                            if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+                            {
+                                if (touchesEdge) edge = true;
+                                continue;
+                            }
+                            if (imageData.GetPixel(nx, ny).A == 0)
+                                edge = true;
+                        }
                     }
-                    if (x > 0 && imageData.GetPixel(x - 1, y).A != 0)
-                        edges[y * width + x - 1] = true;
-                    if (x < width - 1 && imageData.GetPixel(x + 1, y).A != 0)
-                        edges[y * width + x + 1] = true;
-                    if (y > 0 && imageData.GetPixel(x, y - 1).A != 0)
-                        edges[(y - 1) * width + x] = true;
-                    if (y < height - 1 && imageData.GetPixel(x, y + 1).A != 0)
-                        edges[(y + 1) * width + x] = true;
+
+                    if (edge)
+                        isEdge[x, y] = true;
                 }
             }
+
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    if (!edges[y * width + x])
+                    if (!isEdge[x, y])
                         continue;
 
-                    if (touchesEdge)
+                    for (int t = 1; t <= thickness; t++)
                     {
-                        outline.SetPixel(x, y, red);
-                    }
-                    else
-                    {
-                        int neighborCount = 0;
                         for (int dy = -1; dy <= 1; dy++)
                         {
                             for (int dx = -1; dx <= 1; dx++)
                             {
-                                if (dx == 0 && dy == 0)
+                                if (Math.Abs(dx) + Math.Abs(dy) != 1)
                                     continue;
 
-                                int nx = x + dx;
-                                int ny = y + dy;
+                                int nx = touchesEdge ? x - dx * t : x + dx * (t + 0);
+                                int ny = touchesEdge ? y - dy * t : y + dy * (t + 0);
 
                                 if (nx >= 0 && ny >= 0 && nx < width && ny < height)
                                 {
-                                    if (imageData.GetPixel(nx, ny).A != 0)
-                                        neighborCount++;
-                                }
-                            }
-                        }
-
-                        if (neighborCount == 1)
-                        {
-                            int tx = x + 1, ty = y - 1;
-                            int bx = x - 1, by = y + 1;
-
-                            if (tx >= 0 && ty >= 0 && tx < outline.Width && ty < outline.Height)
-                                outline.SetPixel(tx, ty, red);
-
-                            if (bx >= 0 && by >= 0 && bx < outline.Width && by < outline.Height)
-                                outline.SetPixel(bx, by, red);
-                        }
-
-                        for (int dy = -1; dy <= 1; dy++)
-                        {
-                            for (int dx = -1; dx <= 1; dx++)
-                            {
-                                if (Math.Abs(dx) == Math.Abs(dy))
-                                    continue;
-
-                                int nx = x + dx;
-                                int ny = y + dy;
-
-                                if (nx >= 0 && ny >= 0 && nx < outline.Width && ny < outline.Height)
-                                {
                                     if (imageData.GetPixel(nx, ny).A == 0)
-                                        outline.SetPixel(nx, ny, red);
+                                        outline.SetPixel(nx, ny, outlineColor);
                                 }
                             }
                         }
-
                     }
                 }
             }
@@ -132,6 +103,22 @@ namespace AppleSkin.Helpers
             }
 
             return cropped;
+        }
+
+        internal static RawImageData Walter(RawImageData source, RawImageData? mask = null) // i made this tho if its not obvious (its very obvious)
+        {
+            bool covid = mask != null;
+            int width = source.Width;
+            int height = source.Height;
+            RawImageData colored = new(width, height);
+            if (covid && (mask!.Width != width || mask.Height != height))
+                mask = mask.Resized(width, height);
+            for (int y = 0; y < height; y++) // this is python real
+                for (int x = 0; x < width; x++)
+                    if (source.GetPixel(x, y).A != 0 && !(covid && mask!.GetPixel(x, y).A != 0))
+                        colored.SetPixel(x, y, ColorF.White);
+
+            return colored;
         }
     }
 }
